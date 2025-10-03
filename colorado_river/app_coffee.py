@@ -1,326 +1,240 @@
+
 #!/usr/bin/env python3
-"""
-Streamlit Coffee EDA App (Kaggle → clean Parquet → interactive charts)
-
-What this app does
-------------------
-- Ensures a local, clean dataset exists at `data/coffee/coffee.parquet`.
-  - If not found, it tries to download & normalize the Kaggle dataset
-    `hanifalirsyad/coffee-scrap-coffeereview` via coffee_kaggle.py.
-- Loads the table and gives you filters for roaster/origin/process/variety,
-  date range (if present), and rating thresholds.
-- Shows quick EDA: rating distribution, top roasters/origins by average rating,
-  sensory scatter (aroma/flavor/body/aftertaste/acidity/sweetness), and
-  top tasting-note terms.
-
-How to run
-----------
-  pip install streamlit pandas numpy altair pyarrow
-  streamlit run app_coffee.py
-
-If Parquet isn't there yet, the app will attempt:
-  from coffee_kaggle import load; load("kagglehub")  # or "cli"
-You can also pre-run:
-  python coffee_kaggle.py --method kagglehub
-"""
-
+# app_coffee.py — Streamlit app for CoffeeReview Kaggle dataset
+# Run: streamlit run app_coffee.py
 from __future__ import annotations
-import re
+
 from pathlib import Path
-from typing import Iterable
-import pandas as pd
+from typing import List, Tuple, Union
+import datetime as _dt
+
 import numpy as np
+import pandas as pd
 import streamlit as st
 import altair as alt
 
-
+# ---------- Config ----------
+st.set_page_config(page_title="Coffee Analysis", page_icon="☕", layout="wide")
 PARQUET = Path("data/coffee/coffee.parquet")
-SENSORY_COLS = ["aroma", "flavor", "body", "aftertaste", "acidity", "sweetness"]
 
+# We lock the UI to these 15 columns (only those present will show)
+WANTED = [
+    "name","roaster","rating","aroma","acidity","body","flavor","aftertaste",
+    "origin","roast","review_date","dec1"
+]
 
-# ------------------------- Helpers -------------------------
-
-def ensure_dataset() -> Path | None:
-    """
-    Make sure data/coffee/coffee.parquet exists.
-    Try to fetch via coffee_kaggle.load if missing.
-    """
+# ---------- Utilities ----------
+def ensure_coffee_parquet() -> Path:
+    #Make sure data/coffee/coffee.parquet exists. Attempt to fetch/normalize via coffee_kaggle.py.
     if PARQUET.exists():
         return PARQUET
-
     try:
         from coffee_kaggle import load
-        with st.spinner("Downloading Kaggle dataset via kagglehub..."):
-            res = load(method="kagglehub")
-            path = Path(res.out_path)
-            if path.exists():
-                return path
-    except Exception as e:
-        st.warning(f"KaggleHub path failed: {e}")
-
-    # Fallback to CLI
-    try:
-        from coffee_kaggle import load
-        with st.spinner("Downloading Kaggle dataset via Kaggle CLI..."):
-            res = load(method="cli")
-            path = Path(res.out_path)
-            if path.exists():
-                return path
     except Exception as e:
         st.error(
-            "Could not download the Kaggle dataset automatically. "
-            "Install kagglehub **or** Kaggle CLI and try again.\n\n"
-            "Kaggle CLI quickstart:\n"
-            "  pip install kaggle\n"
-            "  Place kaggle.json in ~/.kaggle/ (from kaggle.com/settings → Create New Token)\n"
-            "  chmod 600 ~/.kaggle/kaggle.json\n"
-            "Then rerun this app."
+            "Missing parquet and could not import `coffee_kaggle`.\n\n"
+            "Create it with:\n\n"
+            "    python coffee_kaggle.py --method kagglehub\n\n"
+            "or set up Kaggle CLI and run `--method cli`.\n\n"
+            f"Details: {e}"
         )
-        st.exception(e)
+        st.stop()
+    try:
+        res = load("kagglehub")
+        st.success(f"Downloaded & normalized dataset → {res.out_path}")
+    except Exception as e:
+        st.warning(f"kagglehub failed ({e}). Trying Kaggle CLI...")
+        try:
+            res = load("cli")
+            st.success(f"Downloaded & normalized dataset via CLI → {res.out_path}")
+        except Exception as e2:
+            st.error(f"Failed to obtain dataset. Please run coffee_kaggle.py manually.\n\n{e2}")
+            st.stop()
+    return PARQUET
 
-    return None
+@st.cache_data(show_spinner=True)
+def load_df() -> pd.DataFrame:
+    #Load, coerce types, and restrict to the 15-column view.\"\"\"
+    path = ensure_coffee_parquet()
+    df = pd.read_parquet(path)
 
-
-@st.cache_data(show_spinner=False)
-def load_df(parquet_path: str) -> pd.DataFrame:
-    df = pd.read_parquet(parquet_path)
-    # basic cleanup
+    # Type fixes
     if "review_date" in df.columns:
         df["review_date"] = pd.to_datetime(df["review_date"], errors="coerce", utc=True)
-        # drop tz for Altair/Streamlit serialization
-        df["review_date"] = df["review_date"].dt.tz_convert("America/Denver").dt.tz_localize(None)
-    # standardize text columns
-    for col in ["name", "roaster", "origin", "process", "variety", "roast", "notes"]:
-        if col in df.columns:
-            df[col] = df[col].astype("string").str.strip()
-    # coercions
-    if "rating" in df.columns:
-        df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
-    # computed sensory mean if not present
-    present = [c for c in SENSORY_COLS if c in df.columns]
-    if present and "sensory_mean" not in df.columns:
-        df["sensory_mean"] = df[present].mean(axis=1, skipna=True)
+
+    # Map 'sour' → 'acidity' if needed (defensive if parquet was built differently)
+    if "acidity" not in df.columns and "sour" in df.columns:
+        df["acidity"] = pd.to_numeric(df["sour"], errors="coerce")
+
+    # Keep only the intended columns (and order)
+    keep = [c for c in WANTED if c in df.columns]
+    df = df[keep]
     return df
 
+def sidebar_filters(df: pd.DataFrame) -> pd.DataFrame:
+    st.sidebar.header("Filters")
+    out = df.copy()
 
-def top_terms(series: pd.Series, n: int = 25) -> pd.Series:
-    if series is None or series.dropna().empty:
-        return pd.Series(dtype=int)
-    tokens = (
-        series.fillna("")
-              .astype(str)
-              .str.lower()
-              .str.replace(r"[^a-z0-9\s]", " ", regex=True)
-              .str.split()
-              .explode()
-    )
-    stop = set("the a an of and to for in with on at from by is are it this that these those very coffee".split())
-    tokens = tokens[~tokens.isin(stop)]
-    vc = tokens.value_counts()
-    return vc.head(n)
+    # Rating range
+    if "rating" in out.columns and out["rating"].notna().any():
+        rmin = float(np.nanmin(out["rating"]))
+        rmax = float(np.nanmax(out["rating"]))
+        rsel = st.sidebar.slider("Rating", min_value=int(np.floor(rmin)), max_value=int(np.ceil(rmax)),
+                                 value=(int(np.floor(rmin)), int(np.ceil(rmax))))
+        out = out[(out["rating"] >= rsel[0]) & (out["rating"] <= rsel[1])]
 
+    # Date range (TZ-safe): compare by DATE (not Timestamp) to avoid tz-naive vs tz-aware issues
+    if "review_date" in out.columns and out["review_date"].notna().any():
+        dates_utc = pd.to_datetime(out["review_date"], errors="coerce", utc=True)
+        dmin = dates_utc.min().date()
+        dmax = dates_utc.max().date()
+
+        dsel: Union[_dt.date, Tuple[_dt.date, _dt.date]] = st.sidebar.date_input(
+            "Review date", value=(dmin, dmax), min_value=dmin, max_value=dmax
+        )
+
+        if isinstance(dsel, tuple) and len(dsel) == 2:
+            start_date, end_date = dsel
+        else:
+            # If a single date is returned, use it as both start and end
+            start_date = end_date = dsel if isinstance(dsel, _dt.date) else dmin
+
+        rd = dates_utc.dt.date
+        out = out[(rd >= start_date) & (rd <= end_date)]
+
+    def ms(label: str) -> List[str]:
+        if label not in out.columns:
+            return []
+        opts = sorted([x for x in out[label].dropna().astype(str).unique() if x.strip()])
+        return st.sidebar.multiselect(label.capitalize(), opts)
+
+    for col in ["roaster", "origin", "process", "variety", "roast"]:
+        choices = ms(col)
+        if choices:
+            out = out[out[col].astype(str).isin(choices)]
+
+    return out
 
 def numeric_profile(df: pd.DataFrame) -> pd.DataFrame:
-    num = df.select_dtypes(include=[np.number])
-    if num.empty:
+    numeric_cols = [c for c in ["rating","aroma","acidity","body","flavor","aftertaste","price"] if c in df.columns]
+    if not numeric_cols:
         return pd.DataFrame()
-    return num.agg(["count", "mean", "std", "min", "median", "max"]).T.sort_index()
+    prof = df[numeric_cols].agg(["count","mean","std","min","median","max"]).T
+    prof = prof.rename_axis("metric").reset_index()
+    return prof
 
-
-# ------------------------- UI -------------------------
-
-st.set_page_config(page_title="Coffee Review EDA", layout="wide")
-st.title("☕ Coffee Review Explorer")
-
-st.caption(
-    "Source: Kaggle dataset scraped from CoffeeReview. "
-    "This app loads a normalized Parquet and provides quick filters + charts."
-)
-
-parquet_path = ensure_dataset()
-if parquet_path is None or not Path(parquet_path).exists():
-    st.stop()
-
-df = load_df(str(parquet_path))
-
-with st.sidebar:
-    st.header("Filters")
-
-    # Rating filter
-    min_rating = float(np.nanmin(df["rating"])) if "rating" in df else 0.0
-    max_rating = float(np.nanmax(df["rating"])) if "rating" in df else 100.0
-    r_min, r_max = st.slider(
-        "Rating range",
-        min_value=float(np.floor(min_rating if np.isfinite(min_rating) else 0.0)),
-        max_value=float(np.ceil(max_rating if np.isfinite(max_rating) else 100.0)),
-        value=(
-            float(np.floor(min_rating if np.isfinite(min_rating) else 0.0)),
-            float(np.ceil(max_rating if np.isfinite(max_rating) else 100.0)),
-        ),
-        step=0.5,
+def top_terms(df: pd.DataFrame, col: str = "dec1", n: int = 25) -> pd.DataFrame:
+    if col not in df.columns or df[col].isna().all():
+        return pd.DataFrame(columns=["term","count"])
+    tokens = (
+        df[col].astype(str).str.lower()
+          .str.replace(r"[^a-z0-9\s]", " ", regex=True)
+          .str.split()
+          .explode()
     )
+    stop = set("the a an of and to for in with on at from by is are it this that these those very".split())
+    tokens = tokens[~tokens.isin(stop)]
+    vc = tokens.value_counts().head(n)
+    return vc.rename_axis("term").reset_index(name="count")
 
-    # Multi-select helpers
-    def multiselect_for(col: str, label: str):
-        if col in df.columns:
-            opts = sorted([x for x in df[col].dropna().unique().tolist() if str(x).strip()])
-            return st.multiselect(label, opts, default=[])
-        return []
+def chart_hist(series: pd.Series, title: str):
+    base = pd.DataFrame({"x": series.dropna()})
+    chart = alt.Chart(base).mark_bar().encode(
+        x=alt.X("x:Q", bin=alt.Bin(maxbins=30), title=title),
+        y=alt.Y("count()", title="Count")
+    ).properties(height=260)
+    st.altair_chart(chart, use_container_width=True)
 
-    sel_roaster = multiselect_for("roaster", "Roaster(s)")
-    sel_origin  = multiselect_for("origin",  "Origin(s)")
-    sel_proc    = multiselect_for("process", "Process(es)")
-    sel_var     = multiselect_for("variety", "Variety/Varietal(s)")
+def chart_bar(df: pd.DataFrame, x: str, y: str, title: str, sort_desc: bool = True, limit: int = 15):
+    use = df[[x, y]].dropna()
+    if sort_desc:
+        order = use.groupby(x)[y].mean().sort_values(ascending=False).head(limit).index.tolist()
+    else:
+        order = use.groupby(x)[y].mean().sort_values(ascending=True).head(limit).index.tolist()
+    agg = use.groupby(x, as_index=False)[y].mean()
+    agg = agg[agg[x].isin(order)]
+    chart = alt.Chart(agg).mark_bar().encode(
+        x=alt.X(f"{x}:N", sort=order, title=x.capitalize()),
+        y=alt.Y(f"{y}:Q", title=f"Avg {y}"),
+        tooltip=[x, alt.Tooltip(y, format=".2f")]
+    ).properties(height=300, title=title)
+    st.altair_chart(chart, use_container_width=True)
 
-    date_rng = None
-    if "review_date" in df.columns and df["review_date"].notna().any():
-        dmin = pd.to_datetime(df["review_date"]).min()
-        dmax = pd.to_datetime(df["review_date"]).max()
-        date_rng = st.date_input(
-            "Review date range",
-            value=(dmin.date(), dmax.date()),
-            min_value=dmin.date(),
-            max_value=dmax.date(),
-        )
+# ---------- App ----------
+st.title("☕ Coffee Analysis (Kaggle CoffeeReview)")
+st.caption("Loads `data/coffee/coffee.parquet` (15 columns). Use the sidebar to filter.")
 
-# Apply filters
-mask = pd.Series(True, index=df.index)
-if "rating" in df.columns:
-    mask &= df["rating"].between(r_min, r_max)
+df = load_df()
+filtered = sidebar_filters(df)
 
-def _in_sel(col: str, selected: list[str]) -> pd.Series:
-    if not selected or col not in df.columns:
-        return pd.Series(True, index=df.index)
-    return df[col].isin(selected)
+tab_overview, tab_ratings, tab_sensory, tab_notes = st.tabs(["Data Overview", "Ratings", "Sensory", "Notes"])
 
-mask &= _in_sel("roaster", sel_roaster)
-mask &= _in_sel("origin", sel_origin)
-mask &= _in_sel("process", sel_proc)
-mask &= _in_sel("variety", sel_var)
+with tab_overview:
+    st.subheader("Data Overview")
+    st.write(f"Rows: **{len(filtered):,}**  |  Columns: **{len(filtered.columns)}**")
+    st.dataframe(filtered, use_container_width=True, hide_index=True)
 
-if date_rng and "review_date" in df.columns:
-    d0, d1 = date_rng
-    d0 = pd.to_datetime(d0)
-    d1 = pd.to_datetime(d1) + pd.Timedelta(days=1)  # inclusive end
-    mask &= df["review_date"].between(d0, d1)
+    prof = numeric_profile(filtered)
+    if not prof.empty:
+        st.markdown("**Numeric profile**")
+        st.dataframe(prof, use_container_width=True, hide_index=True)
 
-fdf = df[mask].copy()
+    # Download filtered CSV
+    csv = filtered.to_csv(index=False).encode("utf-8")
+    st.download_button("Download filtered CSV", csv, "coffee_filtered.csv", "text/csv")
 
-# ------------------------- Main Panels -------------------------
-
-tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Ratings", "Sensory", "Notes"])
-
-with tab1:
-    st.subheader("Dataset overview")
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        st.write(f"Rows after filters: **{len(fdf)}**  •  Columns: **{fdf.shape[1]}**")
-        st.dataframe(fdf.head(200))
-    with c2:
-        prof = numeric_profile(fdf)
-        if not prof.empty:
-            st.write("**Numeric profile**")
-            st.dataframe(prof)
-
-with tab2:
+with tab_ratings:
     st.subheader("Ratings")
-    if "rating" not in fdf.columns or fdf["rating"].dropna().empty:
-        st.info("No rating column found.")
+    if "rating" in filtered.columns and filtered["rating"].notna().any():
+        chart_hist(filtered["rating"], "Rating")
+        if "roaster" in filtered.columns:
+            chart_bar(filtered, "roaster", "rating", "Top Roasters by Average Rating", sort_desc=True, limit=15)
+        if "origin" in filtered.columns:
+            chart_bar(filtered, "origin", "rating", "Top Origins by Average Rating", sort_desc=True, limit=15)
     else:
-        c1, c2 = st.columns(2)
-        with c1:
-            hist = (
-                alt.Chart(fdf.dropna(subset=["rating"]))
-                .mark_bar()
-                .encode(x=alt.X("rating:Q", bin=alt.Bin(maxbins=30)), y="count()")
-                .properties(height=260)
-            )
-            st.altair_chart(hist, use_container_width=True)
-        with c2:
-            # top roasters by mean rating
-            if "roaster" in fdf.columns:
-                agg = (
-                    fdf.dropna(subset=["rating", "roaster"])
-                    .groupby("roaster", as_index=False)["rating"]
-                    .mean()
-                    .sort_values("rating", ascending=False)
-                    .head(20)
-                )
-                bar = (
-                    alt.Chart(agg)
-                    .mark_bar()
-                    .encode(y=alt.Y("roaster:N", sort="-x"), x="rating:Q")
-                    .properties(height=500)
-                )
-                st.altair_chart(bar, use_container_width=True)
+        st.info("No rating data available.")
 
-        if "origin" in fdf.columns:
-            st.markdown("**Average rating by origin (top 20)**")
-            agg = (
-                fdf.dropna(subset=["rating", "origin"])
-                .groupby("origin", as_index=False)["rating"]
-                .mean()
-                .sort_values("rating", ascending=False)
-                .head(20)
-            )
-            bar = alt.Chart(agg).mark_bar().encode(y=alt.Y("origin:N", sort="-x"), x="rating:Q").properties(height=500)
-            st.altair_chart(bar, use_container_width=True)
+with tab_sensory:
+    st.subheader("Sensory")
+    present = [c for c in ["aroma","acidity","body","flavor","aftertaste"] if c in filtered.columns]
+    if present:
+        # Average bars for each sensory attribute
+        means = filtered[present].mean(numeric_only=True).reset_index()
+        means.columns = ["attribute","mean"]
+        chart = alt.Chart(means).mark_bar().encode(
+            x=alt.X("attribute:N", sort=present, title="Attribute"),
+            y=alt.Y("mean:Q", title="Mean (filtered)"),
+            tooltip=[alt.Tooltip("mean:Q", format=".2f")]
+        ).properties(height=300, title="Average Sensory Scores")
+        st.altair_chart(chart, use_container_width=True)
 
-with tab3:
-    st.subheader("Sensory relationships")
-    present = [c for c in SENSORY_COLS if c in fdf.columns]
-    if not present:
-        st.info("No sensory columns found.")
+        # Scatter: aroma vs flavor if both present
+        if all(c in filtered.columns for c in ["aroma","flavor"]):
+            scat = alt.Chart(filtered.dropna(subset=["aroma","flavor"])).mark_circle().encode(
+                x=alt.X("aroma:Q"),
+                y=alt.Y("flavor:Q"),
+                tooltip=["name","roaster","rating","aroma","flavor"]
+            ).properties(height=320, title="Aroma vs Flavor")
+            st.altair_chart(scat, use_container_width=True)
     else:
-        c1, c2 = st.columns(2)
-        target = "rating" if "rating" in fdf.columns else "sensory_mean"
-        # scatter aroma vs flavor colored by rating
-        num = fdf.dropna(subset=["aroma", "flavor"])
-        if not num.empty:
-            sc = (
-                alt.Chart(num)
-                .mark_circle(opacity=0.6)
-                .encode(
-                    x="aroma:Q",
-                    y="flavor:Q",
-                    size=alt.Size(target + ":Q", legend=None),
-                    tooltip=["name", "roaster", "origin", "aroma", "flavor", target],
-                )
-                .properties(height=300)
-            )
-            st.altair_chart(sc, use_container_width=True)
+        st.info("No sensory columns available.")
 
-        # radar-style substitute: multiple small bars per attribute avg
-        melted = (
-            fdf[present]
-            .mean()
-            .reset_index()
-            .rename(columns={"index": "attribute", 0: "mean"})
-        )
-        bar2 = (
-            alt.Chart(melted)
-            .mark_bar()
-            .encode(x=alt.X("mean:Q"), y=alt.Y("attribute:N", sort="-x"))
-            .properties(height=220)
-        )
-        st.altair_chart(bar2, use_container_width=True)
+with tab_notes:
+    st.subheader("Notes")
+    tt = top_terms(filtered, "notes", 25)
+    if not tt.empty:
+        chart = alt.Chart(tt).mark_bar().encode(
+            x=alt.X("term:N", sort="-y"),
+            y=alt.Y("count:Q"),
+            tooltip=["term","count"]
+        ).properties(height=320, title="Top Terms in Notes (filtered)")
+        st.altair_chart(chart, use_container_width=True)
 
-with tab4:
-    st.subheader("Tasting notes")
-    if "notes" not in fdf.columns or fdf["notes"].dropna().empty:
-        st.info("No textual notes found.")
+        st.markdown("**Sample notes**")
+        if "name" in filtered.columns and "roaster" in filtered.columns:
+            sample_cols = [c for c in ["name","roaster","origin","rating","notes"] if c in filtered.columns]
+            st.dataframe(filtered[sample_cols].head(25), use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(filtered[["notes"]].head(25), use_container_width=True, hide_index=True)
     else:
-        n = st.slider("Top terms to show", 10, 50, 25, 5)
-        freq = top_terms(fdf["notes"], n=n)
-        if not freq.empty:
-            chart = (
-                alt.Chart(freq.rename_axis("term").reset_index(name="count"))
-                .mark_bar()
-                .encode(y=alt.Y("term:N", sort="-x"), x="count:Q")
-                .properties(height=500)
-            )
-            st.altair_chart(chart, use_container_width=True)
-        st.write("Sample notes")
-        st.dataframe(fdf[["name", "roaster", "origin", "notes"]].head(50))
-
-st.caption("Built for the Kaggle CoffeeReview dataset → normalized to Parquet for fast, repeatable analysis.")
+        st.info("No 'notes' text available.")
