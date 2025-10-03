@@ -193,7 +193,7 @@ with tab_ratings:
             chart_bar(filtered, "origin", "rating", "Top Origins by Average Rating", sort_desc=True, limit=15)
     else:
         st.info("No rating data available.")
-
+ 
 with tab_sensory:
     st.subheader("Sensory")
     present = [c for c in ["aroma","acidity","body","flavor","aftertaste"] if c in filtered.columns]
