@@ -1,0 +1,5 @@
+# Measurement & Reproducibility
+
+Evaluation is central to trustworthy data mining.  We revisit key statistical ideas—estimators, bias–variance trade‑offs, the central limit theorem—and translate them into practice.  Proper data splitting (train, validation, test) and cross‑validation techniques (k‑fold, stratified, leave‑one‑out) are demonstrated, along with bootstrapping for uncertainty quantification.  Students learn to avoid data leakage by ensuring that preprocessing and feature engineering are performed within cross‑validation loops.
+
+We compare metrics across tasks: mean squared error (MSE) and mean absolute error (MAE) for regression; accuracy, precision, recall, F1‑score, ROC‑AUC and PR‑AUC for classification; and discuss when each is appropriate.  Calibration curves and confusion matrices help interpret model outputs.  Finally, we introduce reproducible workflows using git for version control, conda/venv for environment management, and MLflow to record parameters, metrics and artifacts.  Every assignment requires a fixed random seed and a README explaining how to recreate results.

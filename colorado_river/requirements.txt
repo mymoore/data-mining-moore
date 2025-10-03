@@ -1,0 +1,11 @@
+streamlit
+pandas>=2.2
+pyarrow
+httpx
+pytz
+python-dateutil
+matplotlib
+altair
+pytest
+watchdog
+kagglehub

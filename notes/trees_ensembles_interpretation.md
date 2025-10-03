@@ -1,0 +1,5 @@
+# Trees, Ensembles & Interpretation
+
+Decision trees recursively partition the feature space using axis‑aligned splits.  We explore how impurity measures (Gini, entropy) guide split selection, the danger of overfitting with deep trees, and strategies for pruning.  Trees are intuitive but unstable; ensembles improve performance and robustness.
+
+Students learn about bagging and Random Forests, which average many deep trees grown on bootstrap samples, reducing variance.  Boosting techniques such as gradient boosting and XGBoost sequentially correct errors of weak learners and often achieve state‑of‑the‑art performance on tabular data.  Throughout, we focus on **interpretability**: feature importance rankings, permutation importance, partial dependence plots (PDP) and individual conditional expectation (ICE) curves.  We also introduce SHAP values to attribute predictions to features in a consistent, locally accurate manner.  The bias‑variance trade‑off is revisited when comparing single trees and ensembles.

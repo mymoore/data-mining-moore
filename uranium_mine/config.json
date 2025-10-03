@@ -1,0 +1,9 @@
+{
+  "dataset_path": "data/uranium_mines.csv",
+
+  "openai_api_key": "",
+
+  "permit_dataset_path": "",
+
+  "states": ["CO", "UT", "NM", "AZ", "WY"]
+}

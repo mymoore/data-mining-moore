@@ -1,0 +1,5 @@
+# Orientation & Data Mindset
+
+This opening lecture sets the stage for the entire semester.  We introduce students to **CRISP‑DM**, a widely adopted data mining process that cycles through business understanding, data understanding, data preparation, modeling, evaluation and deployment.  By framing the course around this loop, learners start to think of analytics as more than algorithms; it’s about asking the right questions, choosing appropriate data, and iterating toward insight.
+
+We also discuss the importance of identifying real‑world problems where data mining can add value.  Students brainstorm examples from diverse domains—healthcare, marketing, social sciences—to appreciate the broad applicability of the field.  We outline the tools they’ll use (Python, pandas, scikit‑learn, git for version control and MLflow for experiment tracking) and review prerequisite knowledge from CS0–CS2 courses and introductory statistics.  Throughout, we stress that curiosity and critical thinking are key to turning data into decisions.

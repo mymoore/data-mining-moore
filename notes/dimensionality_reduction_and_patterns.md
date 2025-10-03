@@ -1,0 +1,5 @@
+# Dimensionality Reduction & Pattern Discovery
+
+High‑dimensional data often lie near lower‑dimensional manifolds.  **Principal Component Analysis (PCA)** leverages the singular value decomposition (SVD) to rotate features into orthogonal directions of maximal variance.  We show how to project data onto leading components, interpret loadings and reconstruct signals.  Whitening and variance explained plots help decide how many components to retain.
+
+For nonlinear structure, manifold learning techniques such as **t‑SNE** and **UMAP** produce 2D embeddings for visualization.  Students learn parameter sensitivity and how to avoid over‑interpreting clusters in these plots.  We then shift to **pattern discovery**: association rule mining with Apriori and Eclat algorithms extracts frequent itemsets and generates rules scored by support, confidence, lift and conviction.  Sequential pattern mining extends these ideas to ordered transactions.  Evaluation and pruning strategies avoid spurious patterns and highlight actionable insights.

@@ -1,0 +1,17 @@
+# Environment
+.venv/
+
+# Data and debug artifacts
+data/
+debug/
+
+# Streamlit local config/logs
+.streamlit/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS/editor cruft
+.DS_Store
+

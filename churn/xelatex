@@ -1,0 +1,12 @@
+#!/bin/bash
+# Wrapper around tectonic that removes `-quiet` flags
+
+args=()
+for arg in "$@"; do
+  if [[ "$arg" != "-quiet" ]]; then
+    args+=("$arg")
+  fi
+done
+
+# Call tectonic with the cleaned args
+exec tectonic "${args[@]}"

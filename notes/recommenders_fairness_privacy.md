@@ -1,0 +1,5 @@
+# Recommenders, Fairness & Privacy
+
+Recommender systems personalize content.  **Collaborative filtering** leverages patterns in user–item interactions: memory‑based approaches compute similarities between users or items to predict ratings, while model‑based methods (matrix factorization, alternating least squares) learn latent factors.  Students implement both and evaluate them using top‑K metrics like mean average precision (MAP) and normalized discounted cumulative gain (NDCG).  We address cold‑start problems and hybrid recommenders that incorporate content features.
+
+Ethical considerations emerge when models affect people.  We define fairness criteria (demographic parity, equalized odds, calibration), examine trade‑offs between fairness and accuracy, and review methods to mitigate bias through preprocessing, in‑processing and post‑processing techniques.  **Differential privacy** is introduced as a mathematical framework to bound information leakage; we compare it to simpler privacy notions such as k‑anonymity and l‑diversity.  A case study prompts students to audit a trained model for group performance gaps and propose mitigation strategies.
