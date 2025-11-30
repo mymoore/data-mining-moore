@@ -1,5 +1,8 @@
 # Environment
 .venv/
+.ipynb_checkpoints/
+.virtual_documents/
+
 
 # Data and debug artifacts
 data/
