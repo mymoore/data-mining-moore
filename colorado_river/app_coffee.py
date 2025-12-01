@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
+import numpy as np
+from scipy import stats
 
 # ---------- Config ----------
 st.set_page_config(page_title="Coffee Analysis", page_icon="☕", layout="wide")
@@ -216,6 +218,111 @@ with tab_sensory:
                 tooltip=["name","roaster","rating","aroma","flavor"]
             ).properties(height=320, title="Aroma vs Flavor")
             st.altair_chart(scat, use_container_width=True)
+
+        # Rating vs individual sensory attributes with regression line
+        sensory_vs_rating = [c for c in present if c != "rating" and "rating" in filtered.columns]
+        if sensory_vs_rating and filtered["rating"].notna().any():
+            st.markdown("**Rating vs sensory attributes**")
+            cols = st.columns(2)
+
+            # Precompute regression lines for combined view
+            line_rows = []
+            summary_rows = []
+
+            for idx, attr in enumerate(sensory_vs_rating):
+                target_col = cols[idx % 2]
+                data = filtered.dropna(subset=[attr, "rating"])
+                if len(data) < 2:
+                    continue
+
+                # Regression line points
+                res = stats.linregress(data[attr], data["rating"])
+                m, b, r, p, stderr = res.slope, res.intercept, res.rvalue, res.pvalue, res.stderr
+                xs = np.linspace(5, 10, 50)
+                line_rows.extend([{"attribute": attr.capitalize(), "x": xv, "y": m * xv + b} for xv in xs])
+                summary_rows.append(
+                    {
+                        "attribute": attr.capitalize(),
+                        "slope": m,
+                        "intercept": b,
+                        "r": r,
+                        "r2": r**2,
+                        "p_value": p,
+                        "stderr": stderr,
+                    }
+                )
+
+                chart = alt.Chart(data).mark_circle(opacity=0.6, stroke="black", strokeWidth=0.3).encode(
+                    x=alt.X(f"{attr}:Q", title=attr.capitalize(), scale=alt.Scale(domain=[5, 10])),
+                    y=alt.Y("rating:Q", title="Rating", scale=alt.Scale(domain=[75, 100])),
+                    tooltip=["name","roaster","rating",attr]
+                )
+                line_chart = alt.Chart(pd.DataFrame({"x": xs, "y": m * xs + b})).mark_line(color="red").encode(
+                    x=alt.X("x:Q", title=attr.capitalize(), scale=alt.Scale(domain=[5, 10])),
+                    y=alt.Y("y:Q", title="Rating", scale=alt.Scale(domain=[75, 100]))
+                )
+                target_col.altair_chart((chart + line_chart).properties(height=320, title=f"{attr.capitalize()} vs Rating"), use_container_width=True)
+
+            # Combined regression lines chart
+            if line_rows:
+                line_df = pd.DataFrame(line_rows)
+                combined = alt.Chart(line_df).mark_line().encode(
+                    x=alt.X("x:Q", title="Sensory score", scale=alt.Scale(domain=[5, 10])),
+                    y=alt.Y("y:Q", title="Rating", scale=alt.Scale(domain=[75, 100])),
+                    color=alt.Color("attribute:N", title="Attribute")
+                ).properties(height=360, title="Rating vs Sensory (Regression Lines)")
+                st.markdown("**Regression lines (all attributes)**")
+                st.altair_chart(combined, use_container_width=True)
+
+            # Regression summary table + residual diagnostics for a selected attribute
+            if summary_rows:
+                summary_df = pd.DataFrame(summary_rows)
+                st.markdown("**Regression summary (rating ~ sensory)**")
+                st.dataframe(
+                    summary_df[["attribute","slope","intercept","r","r2","p_value","stderr"]]
+                    .round({"slope":3,"intercept":3,"r":3,"r2":3,"p_value":4,"stderr":4}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                # Choose an attribute for residual/influence view
+                chosen = st.selectbox("Residual diagnostics (choose attribute)", [row["attribute"] for row in summary_rows])
+                key_attr = chosen.lower()
+                diag = filtered.dropna(subset=[key_attr, "rating"])
+                if len(diag) >= 3:
+                    res = stats.linregress(diag[key_attr], diag["rating"])
+                    fitted = res.intercept + res.slope * diag[key_attr]
+                    residuals = diag["rating"] - fitted
+
+                    # Leverage for simple regression and Cook's distance approximation
+                    x = diag[key_attr].to_numpy()
+                    n = len(x)
+                    h = 1/n + (x - x.mean())**2 / np.sum((x - x.mean())**2)
+                    mse = np.mean(residuals**2)
+                    cooks = (residuals**2 / (2 * mse)) * (h / (1 - h) ** 2)
+
+                    diag_df = pd.DataFrame(
+                        {
+                            "name": diag["name"] if "name" in diag.columns else "",
+                            "x": x,
+                            "fitted": fitted,
+                            "residual": residuals,
+                            "leverage": h,
+                            "cooks": cooks,
+                        }
+                    )
+
+                    res_chart = alt.Chart(diag_df).mark_circle(opacity=0.7, stroke="black", strokeWidth=0.3).encode(
+                        x=alt.X("fitted:Q", title="Fitted rating"),
+                        y=alt.Y("residual:Q", title="Residual"),
+                        color=alt.Color("cooks:Q", title="Cook's D", scale=alt.Scale(scheme="reds")),
+                        tooltip=["name","x","fitted","residual","leverage","cooks"]
+                    ).properties(height=320, title=f"Residuals vs Fitted — {chosen}")
+                    st.altair_chart(res_chart, use_container_width=True)
+
+                    top_cooks = diag_df.nlargest(3, "cooks")[["name","x","fitted","residual","cooks","leverage"]]
+                    st.caption("Top potential influential points (by Cook's D)")
+                    st.dataframe(top_cooks.round(4), hide_index=True, use_container_width=True)
     else:
         st.info("No sensory columns available.")
 
