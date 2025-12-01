@@ -9,6 +9,15 @@ A small, teaching-oriented Streamlit app that fetches and visualizes USGS river 
   - 00060 = discharge (cubic feet per second)
   - 00065 = gage height (feet)
 
+### Coffee PCA (taste attributes)
+- Uses the coffee tasting dataset (`data/coffee/coffee.parquet`) with aroma, acidity, body, flavor, aftertaste, and rating (4+ related features required for PCA).
+- Run `./python.sh coffee_pca.py` (or `python coffee_pca.py` inside the repo) to generate:
+  - `data/coffee/coffee_pca_loadings.csv`
+  - `data/coffee/coffee_pca_variance.csv`
+  - `data/coffee/coffee_pca_scores.csv`
+- Current explained variance ratio: PC1 0.614, PC2 0.123, PC3 0.107, PC4 0.088 (cumulative 0.932). Loadings show PC1 is a "global quality" axis with strong positive weights across all flavor metrics; PC2 is dominated by body.
+- The script drops rows with missing flavor metrics before fitting and standardizes features so the PCA isn’t biased by scale differences.
+
 ### Repository layout
 - `app.py`: Streamlit UI and charts
 - `usgs.py`: USGS API client, caching to `./data/` as Parquet
@@ -118,5 +127,4 @@ Examples (use the `./px.sh` wrapper so the env is used automatically):
 
 ### License
 Licensed under the MIT License. See `LICENSE`.
-
 

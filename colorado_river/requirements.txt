@@ -9,3 +9,4 @@ altair
 pytest
 watchdog
 kagglehub
+scikit-learn

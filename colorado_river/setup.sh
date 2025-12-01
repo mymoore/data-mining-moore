@@ -6,6 +6,8 @@ cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
 # Source context.sh to get conda_exe, conda_venv, python_exe, etc.
 source ./context.sh
 
+# Default Python version for the env if not provided by caller
+PY_VERSION="${PY_VERSION:-3.11}"
 
 # -------------------- Args --------------------
 SHOW_HELP=false

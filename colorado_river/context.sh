@@ -64,6 +64,9 @@ function streamlit_exports() {
 # Also set env vars explicitly for non-interactive runs
 streamlit_exports
 
+# Avoid protobuf C++/Python mismatch seen with older Streamlit builds.
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
 export -f conda_exe
 export -f conda_venv
 export -f python_exe
