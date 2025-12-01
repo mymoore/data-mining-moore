@@ -14,6 +14,9 @@ import streamlit as st
 import altair as alt
 import numpy as np
 from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
 
 # ---------- Config ----------
 st.set_page_config(page_title="Coffee Analysis", page_icon="☕", layout="wide")
@@ -169,7 +172,7 @@ st.caption("Loads `data/coffee/coffee.parquet` (15 columns). Use the sidebar to 
 df = load_df()
 filtered = sidebar_filters(df)
 
-tab_overview, tab_ratings, tab_sensory, tab_notes = st.tabs(["Data Overview", "Ratings", "Sensory", "Notes"])
+tab_overview, tab_ratings, tab_sensory, tab_regression, tab_notes = st.tabs(["Data Overview", "Ratings", "Sensory", "Regression", "Notes"])
 
 with tab_overview:
     st.subheader("Data Overview")
@@ -325,6 +328,63 @@ with tab_sensory:
                     st.dataframe(top_cooks.round(4), hide_index=True, use_container_width=True)
     else:
         st.info("No sensory columns available.")
+
+with tab_regression:
+    st.subheader("Multivariate Linear Regression (rating ~ sensory)")
+    feature_cols = [c for c in ["aroma","acidity","body","flavor","aftertaste","price"] if c in filtered.columns]
+    feature_cols = [c for c in feature_cols if filtered[c].notna().any()]
+
+    if len(feature_cols) < 2 or "rating" not in filtered.columns:
+        st.info("Need at least two predictor columns and rating to fit a model.")
+    else:
+        reg_data = filtered[feature_cols + ["rating"]].dropna()
+        if len(reg_data) < 10:
+            st.info("Not enough rows after filtering to train/test the model.")
+        else:
+            X = reg_data[feature_cols]
+            y = reg_data["rating"]
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+            y_pred = model.predict(X_test)
+            r2 = r2_score(y_test, y_pred)
+            mse = mean_squared_error(y_test, y_pred)
+            rmse = np.sqrt(mse)
+
+            st.markdown(f"**Features used:** {', '.join(feature_cols)}")
+            st.markdown(f"**Train/Test samples:** {len(X_train)}/{len(X_test)}")
+            st.markdown(f"**R²:** {r2:.4f} &nbsp; | &nbsp; **MSE:** {mse:.4f} &nbsp; | &nbsp; **RMSE:** {rmse:.4f}")
+
+            coef_df = pd.DataFrame({
+                "feature": feature_cols,
+                "coefficient": model.coef_
+            }).sort_values("coefficient", ascending=False)
+            st.markdown("**Coefficients (rating units per feature unit)**")
+            st.dataframe(coef_df.round(4), hide_index=True, use_container_width=True)
+
+            # Predicted vs actual
+            pred_df = pd.DataFrame({"actual": y_test, "pred": y_pred})
+            pred_chart = alt.Chart(pred_df).mark_circle(opacity=0.6, stroke="black", strokeWidth=0.3).encode(
+                x=alt.X("actual:Q", title="Actual rating", scale=alt.Scale(domain=[75, 100])),
+                y=alt.Y("pred:Q", title="Predicted rating", scale=alt.Scale(domain=[75, 100])),
+                tooltip=["actual","pred"]
+            ).properties(height=320, title="Predicted vs Actual")
+            diag_line = alt.Chart(pd.DataFrame({"x": [pred_df["actual"].min()-1, pred_df["actual"].max()+1]})).mark_line(color="red", strokeDash=[4,4]).encode(
+                x="x:Q",
+                y="x:Q"
+            )
+            st.altair_chart(pred_chart + diag_line, use_container_width=True)
+
+            # Residuals
+            resid = y_test - y_pred
+            resid_df = pd.DataFrame({"pred": y_pred, "resid": resid})
+            resid_chart = alt.Chart(resid_df).mark_circle(opacity=0.6, stroke="black", strokeWidth=0.3).encode(
+                x=alt.X("pred:Q", title="Predicted rating", scale=alt.Scale(domain=[75, 100])),
+                y=alt.Y("resid:Q", title="Residual"),
+                tooltip=["pred","resid"]
+            ).properties(height=320, title="Residuals vs Predicted")
+            zero_line = alt.Chart(pd.DataFrame({"y":[0]})).mark_rule(color="red").encode(y="y:Q")
+            st.altair_chart(resid_chart + zero_line, use_container_width=True)
 
 with tab_notes:
     st.subheader("Notes")
