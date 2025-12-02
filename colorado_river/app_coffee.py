@@ -176,6 +176,20 @@ def bin_rating(r: float) -> str:
         return "Med"
     return "High"
 
+def compute_pca_view(df: pd.DataFrame):
+    try:
+        from coffee_pca import compute_pca, FEATURE_COLS
+    except Exception:
+        return None, None, None
+    needed = [c for c in FEATURE_COLS if c in df.columns]
+    if len(needed) < 2:
+        return None, None, None
+    try:
+        loadings, variance, scores = compute_pca(df, needed)
+        return loadings, variance, scores
+    except Exception:
+        return None, None, None
+
 # ---------- App ----------
 st.title("☕ Coffee Analysis (Kaggle CoffeeReview)")
 st.caption("Loads `data/coffee/coffee.parquet` (15 columns). Use the sidebar to filter.")
@@ -183,7 +197,9 @@ st.caption("Loads `data/coffee/coffee.parquet` (15 columns). Use the sidebar to 
 df = load_df()
 filtered = sidebar_filters(df)
 
-tab_overview, tab_ratings, tab_sensory, tab_regression, tab_classify, tab_notes = st.tabs(["Data Overview", "Ratings", "Sensory", "Regression", "Classification", "Notes"])
+tab_overview, tab_ratings, tab_sensory, tab_pca, tab_regression, tab_classify, tab_notes = st.tabs(
+    ["Data Overview", "Ratings", "Linear Regressions", "PCA", "Multiple Dimensions", "Classification", "Notes"]
+)
 
 with tab_overview:
     st.subheader("Data Overview")
@@ -211,7 +227,7 @@ with tab_ratings:
         st.info("No rating data available.")
  
 with tab_sensory:
-    st.subheader("Sensory")
+    st.subheader("Linear Regressions")
     present = [c for c in ["aroma","acidity","body","flavor","aftertaste"] if c in filtered.columns]
     if present:
         # Average bars for each sensory attribute
@@ -337,11 +353,55 @@ with tab_sensory:
                     top_cooks = diag_df.nlargest(3, "cooks")[["name","x","fitted","residual","cooks","leverage"]]
                     st.caption("Top potential influential points (by Cook's D)")
                     st.dataframe(top_cooks.round(4), hide_index=True, use_container_width=True)
+
+                st.markdown("**Interpretations**")
+                st.markdown(
+                    "Higher sensory scores are associated with higher ratings across the board. Flavor and aroma have the steepest slopes; "
+                    "acidity has the highest correlation. The regression lines let you compare these differences visually (steeper line = larger rating jump per sensory point). "
+                    "In short for this dataset: all sensory scores are positively associated with rating; acidity tracks ratings the tightest (highest r), "
+                    "flavor moves ratings the fastest (steepest slope), and Cook’s D highlights a few influential coffees (usually at the sensory extremes or with atypical rating given their sensory)."
+                )
+                st.markdown("**Self Notes: How to read data**")
+                st.markdown(
+                    "- r (correlation) and r²: strength of the linear relationship and variance explained; higher = tighter association. Acidity has the highest r (~0.78); others ~0.65–0.74.\n"
+                    "- p-value: tests if the slope differs from zero; small p ⇒ relationship is statistically significant.\n"
+                    "- Std. error of slope: uncertainty on the slope; smaller = more precise.\n"
+                    "- Residuals: how far each coffee is above/below the fitted line (positive = higher than predicted).\n"
+                    "- Leverage: how far a point’s sensory score is from the mean sensory score (edges of 5–10 range have higher leverage).\n"
+                    "- Cook’s D: combines leverage and residual size to flag points that would change the fitted line most if removed; high Cook’s D points are worth inspecting."
+                )
     else:
         st.info("No sensory columns available.")
 
+with tab_pca:
+    st.subheader("PCA (sensory features)")
+    loadings, variance, scores = compute_pca_view(filtered)
+    if loadings is None:
+        st.info("PCA not available (missing features or import error).")
+    else:
+        st.markdown("**Explained variance**")
+        st.dataframe(
+            variance[["component","explained_variance_ratio","cumulative_ratio"]]
+            .round(3),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.markdown("**Loadings** (feature contributions per PC)")
+        st.dataframe(loadings.round(3), use_container_width=True)
+
+        st.markdown("**Scores** (first 5 rows)")
+        st.dataframe(scores.head().reset_index(drop=True), use_container_width=True, hide_index=True)
+
+        st.markdown("**Interpretations**")
+        st.markdown(
+            "- Current explained variance ratio: PC1 0.614, PC2 0.123, PC3 0.107, PC4 0.088 (cumulative 0.932). "
+            'Loadings show PC1 is a "global quality" axis with strong positive weights across all flavor metrics; PC2 is dominated by body.\n'
+            "- The PCA computation drops rows with missing flavor metrics and standardizes features so scale differences don’t bias the components."
+        )
+
 with tab_regression:
-    st.subheader("Multivariate Linear Regression (rating ~ sensory)")
+    st.subheader("Multiple Dimensions (rating ~ sensory)")
     feature_cols = [c for c in ["aroma","acidity","body","flavor","aftertaste","price"] if c in filtered.columns]
     feature_cols = [c for c in feature_cols if filtered[c].notna().any()]
 
@@ -397,6 +457,15 @@ with tab_regression:
             zero_line = alt.Chart(pd.DataFrame({"y":[0]})).mark_rule(color="red").encode(y="y:Q")
             st.altair_chart(resid_chart + zero_line, use_container_width=True)
 
+            st.markdown("**Interpretations**")
+            st.markdown(
+                "R² 0.9977: ~99.8% of rating variance in the test set is explained by the linear combo of the sensory features.\n"
+                "MSE 0.0071 / RMSE 0.0843: On average, test predictions miss the true rating by about 0.08 rating points (very small error).\n"
+                "Coefficients: each is the expected change in rating for a 1-point increase in that sensory score (5–10 scale), holding others fixed. "
+                "They’re all ~1, so a 1-point bump in any sensory metric raises the predicted rating by roughly 1 point.\n"
+                "Intercept ~50.08: where the plane crosses the rating axis when all predictors are zero; not meaningful in practice since sensory scores aren’t near zero."
+            )
+
 with tab_classify:
     st.subheader("Classification (KNN & Decision Tree)")
     feature_cols = [c for c in ["aroma","acidity","body","flavor","aftertaste","price"] if c in filtered.columns]
@@ -450,6 +519,20 @@ with tab_classify:
             cols_conf = st.columns(2)
             cols_conf[0].altair_chart(plot_conf(y_test, y_pred_knn, "KNN Confusion"), use_container_width=True)
             cols_conf[1].altair_chart(plot_conf(y_test, y_pred_tree, "Tree Confusion"), use_container_width=True)
+
+            st.markdown("**Interpretations**")
+            st.markdown(
+                "Quick read of the metrics (same for KNN and Tree):\n"
+                "- Accuracy 0.988: overall, 98.8% of test predictions are correct.\n"
+                "- Per-class:\n"
+                "  High: precision 0.986, recall 1.000, F1 0.993, support 69.\n"
+                "  Low: precision 1.000, recall 0.925, F1 0.961, support 53.\n"
+                "  Med: precision 0.987, recall 0.997, F1 0.992, support 301.\n"
+                "- Macro avg: precision 0.991, recall 0.974, F1 0.982 (treats classes equally).\n"
+                "- Weighted avg: precision/recall/F1 all 0.988 (weighted by class frequency; Med dominates).\n"
+                "- Support: number of true examples per class in the test set.\n"
+                "Bottom line: both models perform almost identically, with excellent precision/recall on High and Med, and very good on Low (slightly lower recall)."
+            )
 
 with tab_notes:
     st.subheader("Notes")
