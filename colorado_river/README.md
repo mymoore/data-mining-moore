@@ -1,13 +1,38 @@
-## Colorado & Gunnison River Flow — Streamlit App
+## Coffee Tasting Analysis — Streamlit App
 
-[![Colorado River CI](https://github.com/wmacevoy/data-mine-wmacevoy/actions/workflows/colorado_river_ci.yaml/badge.svg)](https://github.com/wmacevoy/data-mine-wmacevoy/actions/workflows/colorado_river_ci.yaml)
+This repo analyzes a coffee tasting dataset (Kaggle CoffeeReview) with PCA, linear regression, and classification. The Streamlit app lets you filter coffees, view sensory charts, regression diagnostics, and classification results.
 
-A small, teaching-oriented Streamlit app that fetches and visualizes USGS river data (Colorado & Gunnison Rivers near Grand Junction). It shows instantaneous values (IV), daily values (DV), basic feature engineering, sampling gap diagnostics, and simple anomaly scores.
+### What’s implemented
+- **Streamlit app (`app_coffee.py`)**
+  - Sensory scatter plots vs rating with regression lines and Cook’s D diagnostics.
+  - Multivariate linear regression (rating ~ aroma, acidity, body, flavor, aftertaste, price if present) with coefficients, R²/MSE/RMSE, predicted vs actual, and residual plots.
+  - Classification tab with KNN and Decision Tree (rating binned into Low/Med/High) showing precision/recall/F1 and confusion matrices.
+- **PCA (`coffee_pca.py`)**: runs PCA on sensory features; writes loadings, variance, and scores to `data/coffee/`.
+- **Scatter generator (`coffee_scatter.py`)**: standalone PNGs of each sensory vs rating with regression lines and a combined lines plot.
+- **Multivariate regression script (`coffee_multi_reg.py`)**: saves metrics and plots (pred vs actual, residuals, coefficients) to `data/coffee/`.
+- **KNN/Decision Tree script (`coffee_knn_tree.py`)**: trains 80/20 classifiers on binned ratings; writes metrics to `data/coffee/knn_tree_metrics.txt`.
 
-### Data sources
-- **USGS Water Services API**: `nwis/iv` (instantaneous values) and `nwis/dv` (daily values)
-  - 00060 = discharge (cubic feet per second)
-  - 00065 = gage height (feet)
+### Running the app
+1) Ensure scripts are executable once:
+   ```bash
+   chmod +x setup.sh run.sh px.sh meta.sh python.sh
+   ```
+2) Create/update the env (uses conda/mamba):
+   ```bash
+   ./setup.sh --restart   # or ./setup.sh if env already exists
+   ```
+3) Run Streamlit:
+   ```bash
+   ./run.sh
+   ```
+   Open the printed URL (default `http://localhost:8501`). If you see Matplotlib cache warnings, run with `MPLCONFIGDIR=$(pwd)/.mpl-cache ./run.sh`.
+
+### CLI utilities
+- PCA: `./python.sh coffee_pca.py`
+- Multivariate regression: `./python.sh coffee_multi_reg.py`
+- Scatter PNGs: `./python.sh coffee_scatter.py`
+- KNN/Decision Tree: `./python.sh coffee_knn_tree.py`
+- Parquet explore: `./px.sh data/coffee/coffee.parquet --info --head 5`
 
 ### Coffee PCA (taste attributes)
 - Uses the coffee tasting dataset (`data/coffee/coffee.parquet`) with aroma, acidity, body, flavor, aftertaste, and rating (4+ related features required for PCA).
@@ -18,113 +43,18 @@ A small, teaching-oriented Streamlit app that fetches and visualizes USGS river 
 - Current explained variance ratio: PC1 0.614, PC2 0.123, PC3 0.107, PC4 0.088 (cumulative 0.932). Loadings show PC1 is a "global quality" axis with strong positive weights across all flavor metrics; PC2 is dominated by body.
 - The script drops rows with missing flavor metrics before fitting and standardizes features so the PCA isn’t biased by scale differences.
 
-### Repository layout
-- `app.py`: Streamlit UI and charts
-- `usgs.py`: USGS API client, caching to `./data/` as Parquet
-- `eda.py`: Helpers for timezone handling, resampling, feature engineering, and anomalies
-- `requirements.txt`: Python deps
-- `setup.sh`: Creates/updates the local env at `./.venv`, resets caches, installs deps
-- `context.sh`: Shared helpers (e.g., `conda_exe`, `conda_venv`, `python_exe`, Streamlit env exports)
-- `python.sh`: Runs `python` inside the local env
-- `run.sh`: Runs Streamlit via `python.sh -m streamlit`
-- `px.py`: Simple Parquet data explorer (CLI)
-- `px.sh`: Runs `px.py` inside the env
-- `meta.py`: Lists configured USGS sources from `config.json`
-- `meta.sh`: Runs `meta.py` inside the env
-- `.streamlit/config.toml`: Auto-created by `setup.sh` based on `config.json`
-- `config.json`: App configuration (USGS sources, debug flag, Streamlit defaults)
-- `data/`: Cached Parquet files per site and window
+### Data
+- Primary file: `data/coffee/coffee.parquet` (15 columns including aroma, acidity, body, flavor, aftertaste, rating, price, notes, etc.). Generated from Kaggle CoffeeReview via `coffee_kaggle.py` (not shown here).
 
-### Quick start
-Prerequisites:
-- macOS/Linux with either `mamba` or `conda` on PATH, or Windows WSL 
-Steps:
-1) Make scripts executable once:
-   - `chmod +x setup.sh run.sh px.sh meta.sh python.sh`
-2) Setup/reset the environment
-   - `./setup.sh --help` shows utility flags:
-     - `--debug`: implies `--reset`, clears `./data/` and `./debug/`, sets `config.json.debug=true`
-     - `--reset`: clears `./data/` and `./debug/`; reinstalls deps if needed
-     - `--restart`: deletes and recreates `./.venv` (fresh env)
-3) Run `./run.sh` and open the URL printed by Streamlit (default `http://localhost:8501`).
-   - Extra Streamlit args can be passed through, e.g. `./run.sh --server.port 8502`
+### Outputs of interest
+- PCA: `data/coffee/coffee_pca_loadings.csv`, `coffee_pca_variance.csv`, `coffee_pca_scores.csv`
+- Regression (standalone script): `data/coffee/multi_reg_metrics.txt`, `multi_reg_pred_vs_actual.png`, `multi_reg_residuals.png`, `multi_reg_coefficients.png`
+- Classification: `data/coffee/knn_tree_metrics.txt`
+- Scatter PNGs: `data/coffee/scatter_rating_vs_*.png`, `scatter_rating_vs_all_lines.png`
 
-
-Notes:
-- The scripts use a prefix-based env at `./.venv` (no `conda init` or manual activation needed).
-- If you prefer, you can still `conda activate /abs/path/to/.venv` and run `python -m streamlit run app.py` by hand.
-
-### How it works (short version)
-- IV data are fetched in UTC, converted to America/Denver for display, then made
-  timezone-naive before display to ensure Arrow/Streamlit compatibility.
-- DV data are date-indexed (no timezone).
-- Data are cached to `./data/` as Parquet for speed. If you change windows (e.g., IV days, DV years), new cache files are written.
-
-Notes on serialization (Arrow):
-- Streamlit converts DataFrames to Arrow tables. Mixed-type object columns (e.g.,
-  floats + timestamps) can cause errors. The app sanitizes DataFrames before
-  display so datetime columns are timezone-naive and numeric columns remain
-  numeric.
-- The IV gap summary is rendered as JSON to avoid mixed-type table issues.
-
-### JSON debug views
-For easier troubleshooting of timestamp and schema, the app includes expanders showing small slices of the raw JSON from USGS:
-- “Raw IV JSON (sample)” under the IV section
-- “Raw DV JSON (sample)” under the DV section
-
-### Troubleshooting
-- **“bad interpreter” or temp-dir shebang errors when starting Streamlit**
-  - We invoke Streamlit via `python -m streamlit` inside the env. Always use `./run.sh`. If you still see issues, try `./setup.sh --restart`
-
-- **ArrowInvalid / tz-aware timestamp errors in Streamlit tables**
-  - This app normalizes datetimes before display. If you still see Arrow errors:
-    - Ensure deps match `requirements.txt` (notably `pandas>=2.2` and `pyarrow`).
-    - Delete stale cache files in `./data/` and refresh.
-    - Use the Debug snapshots (below) and open the saved `*_dtypes.txt` files to
-      spot columns with unexpected types.
-
-- **Port already in use**
-  - Stop the other process, or run on a different port: `python -m streamlit run app.py --server.port 8502`
-
-
-### USGS site catalog
-Defined in `config.json` under `usgs_sources`. You can add more site codes as needed, e.g.:
-```
-"Colorado River near Cameo (09095500)": "09095500",
-"Gunnison River near Grand Junction (09152500)": "09152500",
-"Colorado River at CO–UT State Line (09163500)": "09163500",
-```
-
-The app and CLI will load `SITE_CATALOG` from `config.json` with a safe fallback baked into `usgs.py`.
-
-### Meta utilities
-- To list currently available USGS sources:
-  - `./meta.sh`
-
-### Development
-- Python formatting and style: keep code readable and explicit
-- Cached data: safe to delete `./data/*.parquet` when schemas change
-
-Debugging aid (optional):
-- In the app sidebar, enable “Save debug snapshots” to write JSON and CSV
-  snippets into `./debug/`. These include:
-  - `iv_json_*`, `dv_json_*`: raw USGS JSON slices
-  - `iv_raw_*`, `iv_local_*`, `iv_display_*`: IV data at key steps
-  - `dv_*`: DV data
-  - `feats_*`, `anoms_*`, `anoms_display_*`: engineered features/anomalies
-  Each snapshot writes a `*_head.csv` (first rows) and `*_dtypes.txt` (column
-  dtypes) to help diagnose schema issues.
+### Environment notes
+- Uses local conda env at `./.venv`. To run Python directly: `./python.sh your_script.py`.
+- Key dependencies: streamlit (1.29), pandas, pyarrow, scikit-learn, scipy, altair (4.2.2).
 
 ### License
-### Parquet Explorer (CLI)
-Use `px.py` to browse cached Parquet files from the command line.
-
-Examples (use the `./px.sh` wrapper so the env is used automatically):
-- List columns and dtypes: `./px.sh data/*.parquet --columns`
-- Show head and basic info: `./px.sh data/09163500_dv_5y.parquet --info --head 10`
-- Select columns and filter rows: `./px.sh data/09095500_iv_7d.parquet --select time,discharge_cfs --where "discharge_cfs > 1000" --head 10`
-- Time-window filter: `./px.sh data/09095500_iv_7d.parquet --time-col time --start 2025-08-10 --end 2025-08-12 --head 20`
-
-### License
-Licensed under the MIT License. See `LICENSE`.
-
+MIT License (see `LICENSE`).
